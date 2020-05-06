@@ -60,9 +60,9 @@ public class ShapeOfSquare : MonoBehaviour
         Gizmos.color = Color.black;
         for (int i = 0; i < Vertex.Length - 1; i++)
         {
-            Gizmos.DrawLine(Vertex[i], Vertex[i + 1]);
+            Gizmos.DrawLine(Vertex[i] + Vector3.forward, Vertex[i + 1] + Vector3.forward);
         }
-        Gizmos.DrawLine(Vertex[Vertex.Length - 1], Vertex[0]);
+        Gizmos.DrawLine(Vertex[Vertex.Length - 1] + Vector3.forward, Vertex[0] + Vector3.forward);
     }
 
     Vector3 RotateVector(float x,float y)

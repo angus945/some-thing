@@ -2,54 +2,74 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.iOS;
 
 public class LightPoint : MonoBehaviour
 {
 
+    [System.Serializable]
     class LightRayInfo
     {
+        LightPoint lightPoint;
+
         public Vector3 rayDirction;
         public Vector3 vertiex;
         public Vector3 vertiexOfCollinear;
+        public Vector3 RayEndPoint { get => rayDirction + lightPoint.LightPosition; }
 
         public bool useVertiex = false;
         public bool isFailure = false;
         public bool isBlocking = false;
 
-        public LightRayInfo(Vector3 rayDirction, Vector3 vertiex)
+        public float angle;
+        public float Angle
+        {
+            get
+            {
+                float angle = Mathf.Atan2(rayDirction.y, rayDirction.x);
+
+                this.angle = angle;
+                return (angle > 0) ? angle : 360 - Mathf.Abs(angle);
+            }
+        }
+
+        public LightRayInfo(Vector3 rayDirction, Vector3 vertiex, LightPoint lightPoint)
         {
             this.rayDirction = rayDirction;
             this.vertiex = vertiex;
+            this.lightPoint = lightPoint;
         }
     }
 
     ShapeOfSquare[] Squares { get => FindObjectsOfType<ShapeOfSquare>(); }
 
     [SerializeField] float lightRadius = 5f;
-    Vector3 LightPosition { get => transform.position; }
+    public Vector3 LightPosition { get => transform.position; }
 
     [SerializeField][Range(10,100)] int circleEdge = 50;
 
+    [SerializeField] MeshFilter meshFinter;
+
     [Space]
     [SerializeField] bool showResult = true;
+    [SerializeField] bool showMesh = true;
 
     [Header("Debug")]
     [SerializeField] bool showDebugA = true;
     [SerializeField] bool showDebugB = true;
     [SerializeField] bool showDebugC = true;
 
-    void Start()
-    {
+    List<LightRayInfo> lightCheckRay = new List<LightRayInfo>();
+    List<Vector3> meshVertex = new List<Vector3>();
+    List<int> meshTri = new List<int>();
 
-    }
     void OnDrawGizmos()
     {
 
         DrawCircle();
-
-        List<LightRayInfo> lightCheckRay = new List<LightRayInfo>();
-        List<Vector3> meshVertex = new List<Vector3>();
-        List<int> meshTri = new List<int>();
+        lightCheckRay.Clear();
+        meshVertex.Clear();
+        meshTri.Clear();
 
         foreach (var square in Squares)
         {
@@ -76,14 +96,15 @@ public class LightPoint : MonoBehaviour
                 }
 
                 bool useVertiex = false;
-                if (!haveInterest) lightCheckRay.Add(new LightRayInfo(dirction, vertex));
+                if (!haveInterest) lightCheckRay.Add(new LightRayInfo(dirction, vertex,this));
+                else if ((LightPosition - vertex).sqrMagnitude < (LightPosition - firstInteresection).sqrMagnitude)
+                {
+                    useVertiex = true;
+                    lightCheckRay.Add(new LightRayInfo(vertex - LightPosition, vertex,this) { useVertiex = true });
+                }
                 else
                 {
-                    if((LightPosition - vertex).sqrMagnitude < (LightPosition - firstInteresection).sqrMagnitude )
-                    {
-                        useVertiex = true;
-                        lightCheckRay.Add(new LightRayInfo(vertex - LightPosition, vertex) { useVertiex = true });
-                    }
+                    lightCheckRay.Add(new LightRayInfo(vertex - LightPosition, vertex, this) { isFailure = true });
                 }
 
                 if (showDebugA)
@@ -158,35 +179,137 @@ public class LightPoint : MonoBehaviour
         {
             if (showDebugC)
             {
-                Gizmos.color = Color.yellow;
+                if (lightCheckRay[i].isFailure) Gizmos.color = Color.gray;
+                else Gizmos.color = Color.yellow;
+
                 Gizmos.DrawRay(LightPosition, lightCheckRay[i].rayDirction);
             }
         }
 
+        bool resort = false;
+        for (int i = 0; i < 1000; i++)
+        {
+            for (int j = 0; j < lightCheckRay.Count - 1; j++)
+            {
+                if (lightCheckRay[j].Angle > lightCheckRay[j + 1].Angle)
+                {
+                    (lightCheckRay[j], lightCheckRay[j + 1]) = (lightCheckRay[j + 1], lightCheckRay[j]);
+                    resort = true;
+                }                
+            }
+
+            if (!resort) break;
+        }
+
+        bool haveFailure = false;
+        int tri = 0;
         for (int i = 0; i < lightCheckRay.Count - 1; i++)
         {
             if (!showResult) return;
+            if (lightCheckRay[i].isFailure) continue;
 
             LightRayInfo rayinfoA = lightCheckRay[i];
-            LightRayInfo rayinfoB = lightCheckRay[i + 1];
+            LightRayInfo rayinfoB = null;
+            for (int j = 1; j < lightCheckRay.Count; j++)
+            {
+                if (i + j >= lightCheckRay.Count) break;
+                if (lightCheckRay[i + j].isFailure)
+                {
+                    haveFailure = true;
+                    continue;
+                }
+                else
+                {
+                    rayinfoB = lightCheckRay[i + j];
+                    break;
+                }
+            }
+            if (rayinfoB == null) break;
 
             Gizmos.color = Color.yellow;
 
-            if(!rayinfoA.isBlocking)
+            meshVertex.Add(LightPosition);
+
+
+
+            if(haveFailure)
             {
-                if(rayinfoB.useVertiex)
+                if (!rayinfoA.isBlocking )
                 {
                     Gizmos.DrawLine(rayinfoA.vertiex, rayinfoB.vertiex);
-
+                }
+                else if (rayinfoA.isBlocking && rayinfoB.useVertiex)
+                {
+                    Gizmos.DrawLine(rayinfoA.RayEndPoint, rayinfoB.vertiex);
+                }
+                else if(rayinfoB.isBlocking &&  rayinfoA.useVertiex)
+                {
+                    Gizmos.DrawLine(rayinfoA.vertiex, rayinfoB.RayEndPoint);
+                }
+                else if (rayinfoA.useVertiex || rayinfoB.useVertiex)
+                {
+                    Gizmos.DrawLine(rayinfoA.vertiex, rayinfoB.vertiex);
+                }
+                else
+                {
+                    Gizmos.DrawLine(rayinfoA.vertiex, rayinfoB.vertiex);
                 }
             }
-            if(rayinfoA.useVertiex)
+            else
             {
-                Gizmos.DrawLine(rayinfoA.vertiex, rayinfoB.vertiex);
+                if (rayinfoA.useVertiex || rayinfoB.useVertiex)
+                {
+                    if (rayinfoA.isBlocking)
+                    {
+                        Gizmos.DrawLine(rayinfoA.RayEndPoint, rayinfoB.vertiex);
+                    }
+                    else if (rayinfoB.isBlocking)
+                    {
+                        Gizmos.DrawLine(rayinfoA.vertiex, rayinfoB.RayEndPoint);
+                    }
+                    else
+                    {
+                        Gizmos.DrawLine(rayinfoA.vertiex, rayinfoB.vertiex);
+                    }                    
+                }
+                else if (rayinfoA.isBlocking)
+                {
+                    Gizmos.DrawLine(rayinfoA.RayEndPoint, rayinfoB.vertiex);
+                }
+                else if (rayinfoB.isBlocking)
+                {
+                    Gizmos.DrawLine(rayinfoA.vertiex, rayinfoB.RayEndPoint);
+                }
+                else
+                {
+                    Gizmos.DrawLine(rayinfoA.RayEndPoint, rayinfoB.RayEndPoint);
+                }
             }
 
 
+    
+
+            meshTri.Add(tri + 0);
+            meshTri.Add(tri + 1);
+            meshTri.Add(tri + 2);
+            tri += 3;
+
+            haveFailure = false;
         }
+
+        if (showMesh)
+        {
+            Mesh mesh = new Mesh();
+            mesh.vertices = meshVertex.ToArray();
+            mesh.triangles = meshTri.ToArray();
+            meshFinter.mesh = mesh;
+        }
+        else
+        {
+            meshFinter.mesh.Clear();
+        }
+
+
     }
     void DrawCircle()
     {
